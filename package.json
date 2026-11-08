@@ -3,14 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ComfyUI 提示词整合工具（DeepSeek Harness 插件首版实现）",
+  "description": "ComfyUI 提示词整合工具（DeepSeek Harness 插件）",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:inproc": "node --test --test-isolation=none tests/*.test.js",
     "check": "node tools/check-syntax.js",
     "ui:live": "node tools/ui-live-check.js"
   },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": ">=0.2.2-rc.1 <0.3"
   }
 }

@@ -12,21 +12,30 @@ DeepSeek Harness（dsh）插件：把碎片文本或图片整理成可直接粘�
 
 生成、技能加载、提示词组装和结果校验都在插件服务端；浏览器只负责输入、目录展示和渲染。未连接 dsh 时面板会明确报错，没有独立演示模式或模拟模型输出。
 
-## 在 dsh web profile 中运行
+## 安装
+
+要求 DSH `0.2.2-rc.1` 及以上、`0.3` 以下（见 `package.json` 的 `engines.dsh`），并确保 `pnpm` 在 `PATH` 中（`dsh plugin` 会把参数转发给 pnpm）。插件以 Git 依赖安装，不需要克隆仓库：
 
 ```bash
-dsh plugin --profile web add github:<仓库名>
+dsh plugin --profile web add "git+https://github.com/self-exiler/DSH-Comfyui-Prompt-Generator.git"
 ```
 
-然后在 `~/.dsh/profiles/web/cordis.patch.yml` 追加：
+仓库根是一个 dsh 组合包（`package.json` 的 `dsh.bundle`）：安装成功后 dsh 自动把 `comfyui-prompt-harness-plugin` 加入 `dsh.profile.bundles`，再由根目录的 `cordis.patch.yml` 插入插件行；浏览器半边由 `plugins/comfyui-prompt` 的 `dsh.client` 声明提供。无需手工编辑 `~/.dsh/profiles/web/cordis.patch.yml`。
 
-```yaml
-- insert:
-    - name: dsh-comfyui-prompt-tool
-      config: {}
+重启 `dsh web`，从侧栏打开「ComfyUI 提示词」。需要改挂载前缀、根目录或系统提示词时，按行 id `comfyui-prompt-tool` 在 profile patch 中覆盖 `config`（`prefix`、`root`、`systemPrompt`，见[系统提示词](#系统提示词)）。
+
+升级时先移除再安装（Git 依赖不跟随版本号）：
+
+```bash
+dsh plugin --profile web remove comfyui-prompt-harness-plugin
+dsh plugin --profile web add "git+https://github.com/self-exiler/DSH-Comfyui-Prompt-Generator.git"
 ```
 
-启动 `dsh web` 后，从侧栏打开面板。
+本地开发把仓库本身链接进 profile，改完代码重启 `dsh web` 生效：
+
+```bash
+dsh plugin --profile web add "link:<仓库绝对路径>"
+```
 
 ## 插件路由
 
@@ -66,11 +75,13 @@ npm run check       # 全仓 JS 语法检查
 npm run ui:live     # 真实 dsh 页面联调；需 Node >=22，会真的调用一次模型
 ```
 
-运行时要求 Node >=20（见 package.json `engines`）。
+运行时要求 Node >=20、DSH >=0.2.2-rc.1（见 package.json `engines`）。
 
 ## 目录结构
 
 ```text
+package.json         dsh 组合包声明（dsh.bundle）与开发脚本
+cordis.patch.yml     组合包补丁：插入 comfyui-prompt-tool 插件行
 src/core/
   errors.js          错误码、TaskError、脱敏
   prompt.js          系统契约 + 技能 + 用户消息组装
@@ -101,3 +112,8 @@ tools/
 - 一次直出、无工具：原生技能中“按需读文件 / 运行编译器”的步骤无法执行；
 - 技能自带的正负面、参数和自检并入 `notes`，不是一一对应；
 - 文本、图片补充说明与模式通过 `localStorage` 尽力持久化，图片本体不保存。
+
+## 致谢
+
+- Moss技能来源：[github.com/OpenMOSS/MOSS-Image](https://github.com/OpenMOSS/MOSS-Image)
+- Anima技能来源：[github.com/Nana7mi0721/anima-prompt-mixed](https://github.com/Nana7mi0721/anima-prompt-mixed/)
