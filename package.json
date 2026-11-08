@@ -1,0 +1,16 @@
+{
+  "name": "comfyui-prompt-harness-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ComfyUI 提示词整合工具（DeepSeek Harness 插件首版实现）",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:inproc": "node --test --test-isolation=none tests/*.test.js",
+    "check": "node tools/check-syntax.js",
+    "ui:live": "node tools/ui-live-check.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

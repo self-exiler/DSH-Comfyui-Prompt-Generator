@@ -1,0 +1,478 @@
+/*
+ * 作用域化样式：所有选择器都限定在 .cp-root 下，注入 dsh 宿主 document 时不污染宿主 UI。
+ * 颜色/字体/圆角优先引用 dsh 设计 token（--dsw-alias-* / --dsw-font-family / --dsw-radius-*），
+ * 同文档挂载自动继承宿主的浅色/暗色主题；token 不存在时回退到括号内的浅色值。
+ * 派生色（悬停、软背景、边框）用 color-mix 从语义 token 计算，暗色下同样成立。
+ */
+
+.cp-root {
+  --bg: var(--dsw-alias-bg-base, #f6f7f9);
+  --panel: var(--dsw-alias-bg-layer-1, #ffffff);
+  --border: var(--dsw-alias-border-l2, #e3e6ea);
+  --border-strong: var(--dsw-alias-border-l3, #cfd4da);
+  --text: var(--dsw-alias-label-primary, #1c2024);
+  --text-dim: var(--dsw-alias-label-secondary, #5c6570);
+  --text-faint: var(--dsw-alias-label-tertiary, #8a929c);
+  --accent: var(--dsw-alias-state-business-primary, #2563eb);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  --warn: var(--dsw-alias-state-warn-primary, #b45309);
+  --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--panel));
+  --warn-border: color-mix(in srgb, var(--warn) 30%, var(--panel));
+  --error: var(--dsw-alias-state-error-primary, #b42318);
+  --error-soft: color-mix(in srgb, var(--error) 10%, var(--panel));
+  --error-border: color-mix(in srgb, var(--error) 30%, var(--panel));
+  --ok: var(--dsw-alias-state-success-primary, #15803d);
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, var(--panel));
+  --ok-border: color-mix(in srgb, var(--ok) 30%, var(--panel));
+  --hover: var(--dsw-alias-interactive-bg-hover, #f2f4f7);
+  --subtle: color-mix(in srgb, var(--text) 3%, var(--panel));
+  --muted-fill: color-mix(in srgb, var(--text) 8%, var(--panel));
+  --radius: var(--dsw-radius-md, 10px);
+  --mono: var(--ds-font-family-code, ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace);
+
+  height: 100%;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 var(--dsw-font-family, -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+.cp-root,
+.cp-root *,
+.cp-root *::before,
+.cp-root *::after {
+  box-sizing: border-box;
+}
+
+/* hidden 属性优先级必须高于下面的 display:flex/grid，否则取消状态栏会残留 */
+.cp-root [hidden] {
+  display: none !important;
+}
+
+.cp-root button,
+.cp-root input,
+.cp-root select,
+.cp-root textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.cp-root button {
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  border-radius: var(--dsw-radius-sm, 8px);
+  padding: 7px 12px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.cp-root button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.cp-root button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cp-root button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cp-root button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+}
+
+.cp-root button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.cp-root button.ghost:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.cp-root button.small {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.cp-root .app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.cp-root header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.cp-root .brand {
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cp-root .brand .ver {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.cp-root .mode-switch {
+  display: flex;
+  background: var(--muted-fill);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.cp-root .mode-switch button {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.cp-root .mode-switch button[aria-selected="true"] {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--dsw-shadow-lv1, 0 1px 3px rgba(16, 24, 40, 0.12));
+}
+
+.cp-root .host-status {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--panel);
+}
+
+.cp-root .host-status[data-mode="offline"] {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+}
+
+.cp-root .host-status[data-mode="harness"] {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+}
+
+.cp-root main.layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.85fr) minmax(420px, 1.15fr);
+  gap: 16px;
+  padding: 16px 20px 40px;
+  align-items: start;
+  max-width: 1560px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+@media (max-width: 1080px) {
+  .cp-root main.layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cp-root .col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.cp-root .panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+}
+
+.cp-root .panel > h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-dim);
+  letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cp-root .panel > h2 .spacer {
+  margin-left: auto;
+}
+
+.cp-root textarea,
+.cp-root select {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--dsw-radius-sm, 8px);
+  padding: 8px 10px;
+  background: var(--panel);
+  outline: none;
+}
+
+.cp-root textarea:focus,
+.cp-root select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cp-root #input-text {
+  min-height: 130px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.cp-root .hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 6px;
+}
+
+.cp-root .hint-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cp-root label.field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.cp-root label.field > span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.cp-root .dropzone {
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  background: var(--subtle);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.cp-root .dropzone.dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cp-root .image-preview-wrap {
+  margin-top: 10px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.cp-root .image-preview-wrap img {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: var(--panel);
+}
+
+.cp-root .actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.cp-root .actions .primary {
+  flex: 1;
+}
+
+.cp-root .badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--muted-fill);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.cp-root .badge.inferred {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.cp-root .result-block {
+  margin-bottom: 12px;
+}
+
+.cp-root .result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.cp-root .result-head button {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 3px 9px;
+}
+
+.cp-root pre.prompt-text {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  border: 1px solid var(--border);
+  background: var(--subtle);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 38px;
+  color: var(--text);
+}
+
+.cp-root pre.prompt-text.empty {
+  color: var(--text-faint);
+  font-family: inherit;
+  font-style: italic;
+}
+
+.cp-root .notes-text {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  padding: 10px 12px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cp-root .error-box {
+  border-radius: var(--radius);
+  border: 1px solid var(--error-border);
+  background: var(--error-soft);
+  padding: 12px 14px;
+  color: var(--error);
+}
+
+.cp-root .error-box .err-title {
+  font-weight: 650;
+  margin-bottom: 4px;
+}
+
+.cp-root .error-box .err-stage {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--error) 18%, var(--panel));
+  color: var(--error);
+  margin-right: 6px;
+}
+
+.cp-root .error-box .err-hint {
+  font-size: 12px;
+  margin-top: 6px;
+  color: var(--error);
+}
+
+.cp-root .error-box ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.cp-root .skill-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.cp-root .skill-meta code {
+  font-family: var(--mono);
+  background: var(--muted-fill);
+  padding: 0 4px;
+  border-radius: var(--dsw-radius-xs, 4px);
+}
+
+.cp-root .skill-errors {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cp-root .skill-errors .item {
+  font-size: 12px;
+  padding: 7px 9px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--error-soft);
+  border: 1px solid var(--error-border);
+  color: var(--error);
+}
+
+.cp-root .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.cp-root .spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  animation: cp-spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cp-root .status-line {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

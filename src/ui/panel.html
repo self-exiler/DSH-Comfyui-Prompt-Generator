@@ -1,0 +1,120 @@
+<div class="app">
+  <header>
+    <div class="brand">提示词整合 <span class="ver">v0.2 · 直出版</span></div>
+    <div class="mode-switch" role="tablist" aria-label="任务模式">
+      <button id="mode-text" role="tab" aria-selected="true" data-mode="text">文本整合</button>
+      <button id="mode-image" role="tab" aria-selected="false" data-mode="image">图片反推</button>
+    </div>
+    <div class="host-status" id="host-status" data-mode="offline">检测宿主中…</div>
+  </header>
+
+  <main class="layout">
+    <!-- 左列：输入 / 模型 / 技能 / 动作 -->
+    <section class="col">
+      <div class="panel">
+        <h2>输入 <span class="spacer"></span><span class="badge" id="mode-hint">文本模式</span></h2>
+
+        <div id="text-input-wrap">
+          <label class="field">
+            <span>碎片描述（可以是不完整句子、关键词、中英混写）</span>
+            <textarea id="input-text" placeholder="例如：一个女孩在雨中，不要伞"></textarea>
+          </label>
+          <div class="hint hint-row">
+            <span id="char-count">0 字</span>
+          </div>
+        </div>
+
+        <div id="image-input-wrap" hidden>
+          <div class="dropzone" id="dropzone" tabindex="0" role="button"
+               aria-label="选择或拖拽图片">
+            点击选择图片，或把图片拖到这里
+            <div class="hint">PNG / JPEG / WebP。图片只会发送给你当前选择的 Harness Provider。</div>
+          </div>
+          <input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" hidden />
+          <div class="image-preview-wrap" id="image-preview-wrap" hidden>
+            <img id="image-preview" alt="待反推图片预览" />
+            <div>
+              <div class="hint" id="image-meta"></div>
+              <div class="row">
+                <button type="button" class="small" id="clear-image">移除图片</button>
+              </div>
+            </div>
+          </div>
+          <label class="field" style="margin-top:10px">
+            <span>补充说明（可选，例如“重点看服装细节”）</span>
+            <textarea id="input-image-note" rows="3" placeholder="可选"></textarea>
+          </label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>模型 <span class="spacer"></span>
+          <button type="button" class="small ghost" id="refresh-models">刷新列表</button>
+        </h2>
+        <label class="field">
+          <span>文本模型（用于文本整合）</span>
+          <select id="model-text"></select>
+        </label>
+        <label class="field" id="vision-model-field" hidden>
+          <span>视觉模型（仅列出声明支持图片输入的模型）</span>
+          <select id="model-vision"></select>
+        </label>
+        <div class="hint" id="model-note">
+          模型列表来自 Harness，插件不保存密钥，也不重复维护 Provider 配置。
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>提示词写法技能 <span class="spacer"></span><span class="badge" id="skill-count"></span></h2>
+        <label class="field">
+          <span>技能决定 prompt_en 的写法规范（系统层的三段输出协议不受技能影响）</span>
+          <select id="skill-select"></select>
+        </label>
+        <div class="skill-meta" id="skill-meta"></div>
+        <div class="skill-errors" id="skill-errors"></div>
+      </div>
+
+      <div class="actions">
+        <!-- init() 完成（技能 + 系统提示词 + 模型列表）后才解禁，避免半成品状态下点生成 -->
+        <button type="button" class="primary" id="generate" disabled>初始化中…</button>
+        <button type="button" class="ghost" id="cancel" hidden>取消任务</button>
+      </div>
+      <div class="status-line" id="status-line" hidden>
+        <span class="spinner" aria-hidden="true"></span><span id="status-text"></span>
+      </div>
+
+      <div class="error-box" id="error-box" hidden>
+        <div class="err-title"><span class="err-stage" id="err-stage"></span><span id="err-message"></span></div>
+        <div class="err-hint" id="err-hint"></div>
+        <ul id="err-details"></ul>
+        <div class="row"><button type="button" class="small" id="retry">重试（用户显式触发）</button></div>
+      </div>
+    </section>
+
+    <!-- 右列：三段结果 -->
+    <section class="col">
+      <div class="panel">
+        <h2>结果 <span class="spacer"></span><span class="badge" id="result-meta">无</span></h2>
+
+        <div class="result-block">
+          <div class="result-head">提示词（英文）
+            <button type="button" class="small" id="copy-prompt">复制</button>
+          </div>
+          <pre class="prompt-text empty" id="result-prompt-en">尚未生成</pre>
+        </div>
+
+        <div class="result-block">
+          <div class="result-head">中文翻译
+            <button type="button" class="small" id="copy-translation">复制</button>
+          </div>
+          <pre class="prompt-text empty" id="result-translation">尚未生成</pre>
+        </div>
+
+        <div class="result-block" id="notes-block" hidden>
+          <div class="result-head">补充说明</div>
+          <div class="notes-text" id="result-notes"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>

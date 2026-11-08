@@ -1,0 +1,20 @@
+{
+  "name": "comfyui-prompt-tool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ComfyUI 提示词整合工具：把 src/ui 的 WebView 挂到 dsh web profile，经 ctx.llm 调用模型",
+  "main": "lib/plugin.js",
+  "exports": {
+    ".": "./lib/plugin.js",
+    "./client": "./lib/client.js"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3"
+  }
+}

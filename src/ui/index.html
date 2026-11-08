@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ComfyUI 提示词整合</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #f6f7f9; }
+  #cp-root { height: 100%; }
+</style>
+</head>
+<body>
+<div id="cp-root"></div>
+<script type="module">
+  import { mount } from './app.js';
+  mount(document.getElementById('cp-root')).catch((error) => {
+    console.error('ComfyUI 提示词整合初始化失败', error);
+  });
+</script>
+</body>
+</html>
