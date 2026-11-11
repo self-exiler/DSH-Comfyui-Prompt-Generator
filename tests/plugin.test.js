@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 
 import { apply } from '../plugins/comfyui-prompt/lib/plugin.js';
 import { ROOT, VALID_OUTPUT } from './helpers.js';
@@ -100,7 +101,12 @@ function createApi({
   };
 
   apply(ctx, { systemPrompt });
-  return { handler: routes.find((route) => route.path.endsWith('/api')).handler, calls, warnings };
+  return {
+    handler: routes.find((route) => route.path.endsWith('/api')).handler,
+    staticHandler: routes.find((route) => !route.path.endsWith('/api')).handler,
+    calls,
+    warnings,
+  };
 }
 
 function generationBody(overrides = {}) {
@@ -115,19 +121,15 @@ function generationBody(overrides = {}) {
 }
 
 function startRequest(handler, body, headers = {}) {
-  const req = new EventEmitter();
-  req.method = 'POST';
-  req.url = '/comfyui-prompt/api/generate';
-  req.headers = { 'content-type': 'application/json', ...headers };
+  const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))];
+  const req = Object.assign(Readable.from(chunks), {
+    method: 'POST',
+    url: '/comfyui-prompt/api/generate',
+    headers: { 'content-type': 'application/json', ...headers },
+  });
   req.resume = () => { req.resumed = true; };
   const res = new MockResponse();
-  const pending = handler(req, res);
-  if (body !== undefined) {
-    const text = typeof body === 'string' ? body : JSON.stringify(body);
-    req.emit('data', Buffer.from(text));
-    req.emit('end');
-  }
-  return { pending, req, res };
+  return { pending: handler(req, res), req, res };
 }
 
 async function generate(handler, body, headers) {
@@ -136,15 +138,17 @@ async function generate(handler, body, headers) {
   return res;
 }
 
-async function getJson(handler, pathname) {
+async function get(handler, pathname, method = 'GET') {
   const req = new EventEmitter();
-  req.method = 'GET';
+  req.method = method;
   req.url = `/comfyui-prompt${pathname}`;
   req.headers = {};
   const res = new MockResponse();
   await handler(req, res);
   return res;
 }
+
+const getJson = get;
 
 test('服务端一次生成返回三段结果与元数据', async () => {
   const { handler, calls } = createApi();
@@ -263,7 +267,7 @@ test('模型流错误映射为 MODEL_ERROR，未知异常不泄露原文', async
   assert.ok(!unknown.warnings.join('\n').includes('abcdefgh12345678'));
 });
 
-test('技能目录只返回仓库 skills/ 下的原生技能', async () => {
+test('技能目录只返回仓库 skills/ 下的原生技能，且不下发正文', async () => {
   const { handler } = createApi({
     skills: {
       list: async () => [
@@ -275,8 +279,83 @@ test('技能目录只返回仓库 skills/ 下的原生技能', async () => {
   });
   const res = await getJson(handler, '/api/skills');
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json().skills.map((skill) => skill.name), ['sd-prompt']);
-  assert.equal(res.json().skills[0].content, defaultSkill.content);
+  assert.deepEqual(res.json().skills, [{ name: 'sd-prompt', description: 'SD' }]);
+  assert.ok(!res.body.includes(defaultSkill.content));
+});
+
+test('模型目录聚合各 provider，单个 provider 失败不影响其余', async () => {
+  // createApi 的默认 llm 没有 provider；这里单独挂一个多 provider 的 llm
+  const warnings = [];
+  const routes = [];
+  const ctx = {
+    llm: {
+      listProviders: () => [{ id: 'a', name: 'A' }, { id: 'bad' }, { id: 'c' }],
+      async listModels(id) {
+        if (id === 'bad') throw new Error('timeout token=secretsecret');
+        return [{ id: 'm1', name: 'M1', inputModalities: id === 'a' ? ['text', 'image'] : ['text'] }];
+      },
+    },
+    logger: { info() {}, warn(...args) { warnings.push(args.join(' ')); } },
+    effect: (callback) => callback(),
+    webServer: { register(route) { routes.push(route); return () => {}; } },
+    get: () => null,
+  };
+  apply(ctx, { systemPrompt: 'S' });
+  const res = await getJson(routes.find((route) => route.path.endsWith('/api')).handler, '/api/models');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json().models, [
+    { id: 'a::m1', label: 'M1 · A', vision: true },
+    { id: 'c::m1', label: 'M1 · c', vision: false },
+  ]);
+  assert.ok(!warnings.join('\n').includes('secretsecret'));
+});
+
+test('静态资源只放行 src/，拒绝穿越、隐藏文件与非 GET', async () => {
+  const { staticHandler } = createApi();
+  const page = await get(staticHandler, '/');
+  assert.equal(page.statusCode, 200);
+  assert.match(page.headers['Content-Type'], /text\/html/);
+  assert.equal((await get(staticHandler, '/src/ui/app.js')).statusCode, 200);
+
+  for (const blocked of [
+    '/prompts/system.md',
+    '/package.json',
+    '/skills/sd-prompt/SKILL.md',
+    '/src/%2e%2e/package.json',
+    '/src/%5C..%5Cpackage.json',
+    '/src/..%2F..%2Fpackage.json',
+    '/src/.hidden',
+    '/src/ui/missing.js',
+  ]) {
+    assert.equal((await get(staticHandler, blocked)).statusCode, 404, blocked);
+  }
+  assert.equal((await get(staticHandler, '/', 'POST')).statusCode, 405);
+});
+
+test('响应结束前连接关闭会取消宿主调用', async () => {
+  let aborted = false;
+  const { handler, calls } = createApi({
+    stream: async function* ({ signal }) {
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      aborted = true;
+      yield { type: 'finish', reason: { kind: 'aborted' } };
+    },
+  });
+  const { pending, res } = startRequest(handler, generationBody());
+  while (calls.stream === 0) await new Promise((resolve) => setImmediate(resolve));
+  res.emit('close');
+  await pending;
+  assert.equal(aborted, true);
+  assert.equal(res.json().error.code, 'CANCELLED');
+});
+
+test('请求体不是 JSON 对象或 Content-Type 不对时拒绝', async () => {
+  const { handler, calls } = createApi();
+  assert.equal((await generate(handler, '{broken')).json().error.code, 'BODY_INVALID');
+  assert.equal((await generate(handler, '[]')).json().error.code, 'BODY_INVALID');
+  const wrongType = await generate(handler, generationBody(), { 'content-type': 'text/plain' });
+  assert.equal(wrongType.statusCode, 415);
+  assert.equal(calls.stream, 0);
 });
 
 test('技能注册表缺席时返回明确的不可用错误', async () => {

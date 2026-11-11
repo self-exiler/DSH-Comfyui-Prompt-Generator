@@ -5,19 +5,15 @@
 
 import { TaskError } from './errors.js';
 
-export const SUPPORTED_IMAGE_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/webp']);
-export const OUTPUT_KEYS = Object.freeze(['prompt_en', 'translation_zh', 'notes']);
+const OUTPUT_KEYS = ['prompt_en', 'translation_zh', 'notes'];
 
 /** 宽容解析：去掉 ```json 包裹，截取第一个平衡的 { … } 片段。 */
 export function parseStructuredOutput(raw) {
-  if (typeof raw !== 'string') {
-    throw new TaskError('JSON_INVALID', { message: '模型返回内容为空或不是文本' });
-  }
-  let text = raw.trim();
+  let text = typeof raw === 'string' ? raw.trim() : '';
   if (!text) throw new TaskError('JSON_INVALID', { message: '模型返回内容为空' });
 
-  const fenceMatch = /^```(?:json|JSON)?\s*([\s\S]*?)```$/.exec(text);
-  if (fenceMatch) text = fenceMatch[1].trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(text);
+  if (fence) text = fence[1].trim();
 
   const start = text.indexOf('{');
   if (start === -1) {
@@ -28,25 +24,20 @@ export function parseStructuredOutput(raw) {
   let inString = false;
   let escaped = false;
   let end = -1;
-  for (let index = start; index < text.length; index += 1) {
+  for (let index = start; index < text.length && end === -1; index += 1) {
     const char = text[index];
     if (inString) {
       if (escaped) escaped = false;
       else if (char === '\\') escaped = true;
       else if (char === '"') inString = false;
-      continue;
-    }
-    if (char === '"') inString = true;
-    else if (char === '{') depth += 1;
-    else if (char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        end = index;
-        break;
-      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth += 1;
+    } else if (char === '}' && --depth === 0) {
+      end = index;
     }
   }
-
   if (end === -1) {
     throw new TaskError('JSON_INVALID', { message: '模型返回的 JSON 不完整（大括号未闭合）', details: [previewOf(text)] });
   }
@@ -67,26 +58,18 @@ export function extractResult(parsed) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new TaskError('MODEL_OUTPUT_INVALID', { message: '模型返回的不是 JSON 对象' });
   }
-  const missing = OUTPUT_KEYS.filter((key) => !(key in parsed));
-  if (missing.length) {
+  const invalid = OUTPUT_KEYS.filter((key) => typeof parsed[key] !== 'string');
+  if (invalid.length) {
     throw new TaskError('MODEL_OUTPUT_INVALID', {
       message: '模型返回的三段 JSON 字段不符合契约',
-      details: [`缺少字段：${missing.join(', ')}`],
+      details: invalid.map((key) => `${key} 缺失或不是字符串`),
     });
   }
-  for (const key of OUTPUT_KEYS) {
-    if (typeof parsed[key] !== 'string') {
-      throw new TaskError('MODEL_OUTPUT_INVALID', {
-        message: `字段 ${key} 必须是字符串`,
-        details: [`${key} 类型：${Array.isArray(parsed[key]) ? 'array' : typeof parsed[key]}`],
-      });
-    }
-  }
-  const prompt_en = parsed.prompt_en.trim();
+  const [prompt_en, translation_zh, notes] = OUTPUT_KEYS.map((key) => parsed[key].trim());
   if (!prompt_en) {
     throw new TaskError('MODEL_OUTPUT_INVALID', { message: 'prompt_en 为空，没有可交付的提示词' });
   }
-  return { prompt_en, translation_zh: parsed.translation_zh.trim(), notes: parsed.notes.trim() };
+  return { prompt_en, translation_zh, notes };
 }
 
 function previewOf(text, limit = 160) {

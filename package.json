@@ -6,9 +6,7 @@
   "description": "ComfyUI 提示词整合工具（DeepSeek Harness 插件）",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:inproc": "node --test --test-isolation=none tests/*.test.js",
-    "check": "node tools/check-syntax.js",
-    "ui:live": "node tools/ui-live-check.js"
+    "check": "node tools/check-syntax.js"
   },
   "dsh": {
     "bundle": {

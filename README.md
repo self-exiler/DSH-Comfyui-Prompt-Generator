@@ -40,9 +40,8 @@ dsh plugin --profile web add "link:<仓库绝对路径>"
 ## 插件路由
 
 ```text
-GET  <mount>/api/health    连通性探测
 GET  <mount>/api/models    模型目录（ctx.llm）
-GET  <mount>/api/skills    仓库原生技能目录
+GET  <mount>/api/skills    仓库原生技能目录（仅名称与简介，正文不下发浏览器）
 POST <mount>/api/generate  输入 + modelId + skillName -> 三段结果
 GET  <mount>/src/*         面板静态资源（仅 src/ 目录）
 ```
@@ -72,7 +71,6 @@ GET  <mount>/src/*         面板静态资源（仅 src/ 目录）
 ```bash
 npm test            # node:test 单元测试（无需宿主）
 npm run check       # 全仓 JS 语法检查
-npm run ui:live     # 真实 dsh 页面联调；需 Node >=22，会真的调用一次模型
 ```
 
 运行时要求 Node >=20、DSH >=0.2.2-rc.1（见 package.json `engines`）。
@@ -84,7 +82,7 @@ package.json         dsh 组合包声明（dsh.bundle）与开发脚本
 cordis.patch.yml     组合包补丁：插入 comfyui-prompt-tool 插件行
 src/core/
   errors.js          错误码、TaskError、脱敏
-  prompt.js          系统契约 + 技能 + 用户消息组装
+  prompt.js          系统契约 + 技能 + 用户消息组装（含图片格式白名单）
   task.js            三段 JSON 解析与校验
 src/host/
   http-bridge.js     浏览器 -> 插件的唯一通道
@@ -102,7 +100,6 @@ plugins/comfyui-prompt/
 tests/               node:test
 tools/
   check-syntax.js    语法检查
-  ui-live-check.js   真实 dsh 页面联调
 ```
 
 依赖方向：`ui -> host -> HTTP`；服务端直接复用 `core`。

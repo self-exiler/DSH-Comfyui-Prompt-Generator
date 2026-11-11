@@ -3,11 +3,13 @@
  * UI 只负责输入、目录展示和结果渲染；模型调用、提示词、技能与解析全部在 dsh 插件服务端。
  */
 
-import { SUPPORTED_IMAGE_TYPES } from '../core/task.js';
-import { TaskError, toTaskError, redactSecrets } from '../core/errors.js';
-import { probeHttpHarness } from '../host/http-bridge.js';
+import { IMAGE_TYPES } from '../core/prompt.js';
+import { TaskError, toTaskError } from '../core/errors.js';
+import { createBridge } from '../host/http-bridge.js';
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** 本文件位于 <挂载根>/src/ui/，挂载根在其上两级 */
+const MOUNT_ROOT = new URL('../../', import.meta.url);
 const PANEL_URL = new URL('./panel.html', import.meta.url);
 const STYLES_URL = new URL('./styles.css', import.meta.url);
 
@@ -37,7 +39,6 @@ function initialState() {
     busy: false,
     image: null,
     imageLimits: null,
-    connected: false,
   };
 }
 
@@ -72,7 +73,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
   const state = initialState();
   const el = (id) => root.querySelector(`#${id}`);
 
-  let adapter = null;
+  const bridge = createBridge(MOUNT_ROOT);
   let modelsError = null;
   let modelRefreshToken = 0;
   let skillRefreshToken = 0;
@@ -107,9 +108,9 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
 
   function supportedImageTypes() {
     const list = state.imageLimits?.mediaTypes;
-    if (!Array.isArray(list) || !list.length) return SUPPORTED_IMAGE_TYPES;
-    const allowed = list.filter((type) => SUPPORTED_IMAGE_TYPES.includes(type));
-    return allowed.length ? allowed : SUPPORTED_IMAGE_TYPES;
+    if (!Array.isArray(list) || !list.length) return IMAGE_TYPES;
+    const allowed = list.filter((type) => IMAGE_TYPES.includes(type));
+    return allowed.length ? allowed : IMAGE_TYPES;
   }
 
   function applyImageLimitsHint() {
@@ -122,12 +123,6 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     hint.textContent = `${types}，最大 ${formatBytes(imageMaxBytes())}。图片只会发送给你当前选择的 Harness Provider。`;
   }
 
-  function setReady(readyState) {
-    if (disposed) return;
-    root.dataset.ready = readyState;
-    if (!embedded) document.body.dataset.ready = readyState;
-  }
-
   function setHostStatus(mode, text, title = '') {
     const status = el('host-status');
     status.dataset.mode = mode;
@@ -138,46 +133,29 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
   /* ---------------------------------------------------------------- 初始化 */
 
   async function init() {
-    adapter = await probeHttpHarness(2000, import.meta.url);
-    if (disposed) return;
-
-    state.connected = Boolean(adapter);
     bindEvents();
     restoreSelection();
     updateMode();
     applyImageLimitsHint();
 
-    if (!adapter) {
-      setHostStatus('offline', '未连接 dsh');
-      renderModelNote();
-      renderSkillSelect();
-      renderSkillMeta();
-      renderResults();
-      showError(new TaskError('HOST_ERROR', {
-        message: '未连接 dsh 插件',
-        hint: '请从 dsh 侧栏打开本面板；独立静态页面不再提供演示模式。',
-      }));
-      setReady('unavailable');
-      return;
-    }
-
-    setHostStatus('harness', '已连接 dsh', '模型、技能与系统提示词均由 dsh 插件提供。');
+    // 没有单独的"探测宿主"步骤：目录请求失败即视为未连接，错误原样展示。
     const [skillsResult] = await Promise.allSettled([
       refreshSkills(),
       refreshModels({ silent: true }),
     ]);
     if (disposed) return;
     if (skillsResult.status === 'rejected') {
+      setHostStatus('offline', '未连接 dsh');
       showError(toTaskError(skillsResult.reason));
+    } else {
+      setHostStatus('harness', '已连接 dsh', '模型、技能与系统提示词均由 dsh 插件提供。');
     }
 
     renderSkillSelect();
     renderSkillMeta();
     renderResults();
     renderModelNote();
-    el('generate').disabled = false;
-    el('generate').textContent = '生成提示词';
-    setReady('ok');
+    setBusy(false); // 初始按钮是禁用的"初始化中…"；无论成败都要还原，否则离线时会永远卡住
   }
 
   function restoreSelection() {
@@ -196,10 +174,6 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
 
   function renderModelNote() {
     if (disposed) return;
-    if (!state.connected) {
-      el('model-note').textContent = '未连接 dsh 插件，无法读取模型与技能。';
-      return;
-    }
     if (modelsError) {
       el('model-note').textContent = `模型列表获取失败：${modelsError.message}`;
       return;
@@ -210,15 +184,15 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
   }
 
   async function refreshModels({ silent = false } = {}) {
-    if (disposed || !adapter) return;
+    if (disposed) return;
     const token = ++modelRefreshToken;
     try {
-      const models = await adapter.listModels();
+      const { models, imageLimits } = await bridge.models();
       if (disposed || token !== modelRefreshToken) return;
       state.models = models;
       modelsError = null;
-      if (adapter.imageLimits) {
-        state.imageLimits = adapter.imageLimits;
+      if (imageLimits) {
+        state.imageLimits = imageLimits;
         applyImageLimitsHint();
       }
       renderModelSelects();
@@ -232,14 +206,14 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
   }
 
   async function refreshSkills() {
-    if (disposed || !adapter) return;
+    if (disposed) return;
     const token = ++skillRefreshToken;
-    const payload = await adapter.listSkills();
+    const payload = await bridge.skills();
     if (disposed || token !== skillRefreshToken) return;
     state.skills = payload.skills;
     renderSkillSelect();
     renderSkillMeta();
-    renderSkillErrors(payload);
+    renderSkillHint(payload.hint);
   }
 
   function renderModelSelects() {
@@ -251,7 +225,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     textSelect.innerHTML = '';
     if (!state.models.length) textSelect.append(new Option('（无可用模型）', ''));
     for (const model of state.models) {
-      const suffix = model.capabilities?.vision ? ' · 支持图片' : '';
+      const suffix = model.vision ? ' · 支持图片' : '';
       textSelect.append(new Option(`${model.label}${suffix}`, model.id));
     }
     const textChoice = state.models.some((model) => model.id === previousText)
@@ -261,7 +235,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     state.modelText = textChoice;
 
     visionSelect.innerHTML = '';
-    const visionModels = state.models.filter((model) => model.capabilities?.vision);
+    const visionModels = state.models.filter((model) => model.vision);
     if (!visionModels.length) visionSelect.append(new Option('（没有声明支持图片的模型）', ''));
     for (const model of visionModels) visionSelect.append(new Option(model.label, model.id));
     const visionChoice = visionModels.some((model) => model.id === previousVision)
@@ -313,19 +287,15 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     box.append(document.createElement('br'), '来源：本仓库原生技能（dsh 发现）');
   }
 
-  function renderSkillErrors(payload) {
+  /** 目录为空时服务端会给出排查提示 */
+  function renderSkillHint(hint) {
     const box = el('skill-errors');
     box.replaceChildren();
-    const items = [
-      ...(payload.failures ?? []).map((name) => `技能 ${name} 无法从本仓库加载`),
-      ...(!payload.skills.length && payload.hint ? [payload.hint] : []),
-    ];
-    for (const message of items) {
-      const div = document.createElement('div');
-      div.className = 'item';
-      div.textContent = message;
-      box.append(div);
-    }
+    if (!hint) return;
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.textContent = hint;
+    box.append(div);
   }
 
   /* ------------------------------------------------------------------ 模式 */
@@ -479,10 +449,6 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
 
   async function generate() {
     if (disposed || state.busy) return;
-    if (!adapter) {
-      showError(new TaskError('HOST_ERROR', { message: '未连接 dsh 插件' }));
-      return;
-    }
     const skill = currentSkill();
     if (!skill) {
       showError(new TaskError('NO_SKILL'));
@@ -501,8 +467,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
         }));
         return;
       }
-      const model = state.models.find((item) => item.id === modelId);
-      if (!model?.capabilities?.vision) {
+      if (!state.models.find((item) => item.id === modelId)?.vision) {
         showError(new TaskError('VISION_UNSUPPORTED'));
         return;
       }
@@ -523,14 +488,13 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     const controller = new AbortController();
     activeController = controller;
     try {
-      const output = await adapter.generate({
+      const output = await bridge.generate({
         mode: state.mode,
         text,
         image: state.mode === 'image' ? state.image : null,
         modelId,
         skillName: skill.name,
-        signal: controller.signal,
-      });
+      }, controller.signal);
       if (disposed) return;
       state.result = output.result;
       state.meta = output.meta;
@@ -609,7 +573,6 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     meta.textContent = [
       state.meta?.skillName,
       state.meta?.modelId,
-      state.meta?.llmCalls ? '1 次模型调用' : null,
       state.meta?.durationMs !== undefined ? `${state.meta.durationMs} ms` : null,
     ].filter(Boolean).join(' · ') || '无';
   }
@@ -655,18 +618,17 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
 
   function showError(error) {
     if (disposed) return;
-    const err = error instanceof TaskError ? error : toTaskError(error);
+    // TaskError 构造时已对 message / hint / details 脱敏
+    const err = toTaskError(error);
     el('error-box').hidden = false;
-    el('err-stage').textContent = err.stageLabel ?? err.stage ?? '错误';
-    el('err-message').textContent = redactSecrets(err.message);
-    el('err-hint').textContent = redactSecrets(err.hint ?? '');
-    const list = el('err-details');
-    list.innerHTML = '';
-    for (const detail of err.details ?? []) {
+    el('err-stage').textContent = err.stageLabel;
+    el('err-message').textContent = err.message;
+    el('err-hint').textContent = err.hint;
+    el('err-details').replaceChildren(...err.details.map((detail) => {
       const li = document.createElement('li');
-      li.textContent = redactSecrets(String(detail));
-      list.append(li);
-    }
+      li.textContent = detail;
+      return li;
+    }));
   }
 
   function hideError() {
@@ -706,7 +668,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
       if (disposed || error?.name === 'AbortError') throw error;
       showError(toTaskError(error));
       setHostStatus('offline', '初始化失败');
-      setReady('failed');
+      setBusy(false);
     }
     if (disposed) throw abortError();
     return dispose;
