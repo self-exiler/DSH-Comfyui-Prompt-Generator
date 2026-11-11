@@ -238,9 +238,13 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     const visionModels = state.models.filter((model) => model.vision);
     if (!visionModels.length) visionSelect.append(new Option('（没有声明支持图片的模型）', ''));
     for (const model of visionModels) visionSelect.append(new Option(model.label, model.id));
+    // 未手动选过图片模型时，优先跟随文本模型所在的 Provider；
+    // 避免默认落到另一个余额/限流不可用的 Provider。
+    const providerOf = (id) => String(id).split('::')[0];
+    const sameProviderVision = visionModels.find((model) => providerOf(model.id) === providerOf(textChoice));
     const visionChoice = visionModels.some((model) => model.id === previousVision)
       ? previousVision
-      : visionModels[0]?.id ?? '';
+      : sameProviderVision?.id ?? visionModels[0]?.id ?? '';
     visionSelect.value = visionChoice;
     state.modelVision = visionChoice;
   }

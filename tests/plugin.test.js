@@ -1,46 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import path from 'node:path';
-import { Readable } from 'node:stream';
 
 import { apply } from '../plugins/comfyui-prompt/lib/plugin.js';
-import { ROOT, VALID_OUTPUT } from './helpers.js';
-
-class MockResponse extends EventEmitter {
-  constructor() {
-    super();
-    this.statusCode = 0;
-    this.headers = {};
-    this.body = '';
-    this.writableEnded = false;
-    this.destroyed = false;
-  }
-
-  writeHead(statusCode, headers = {}) {
-    this.statusCode = statusCode;
-    Object.assign(this.headers, headers);
-    return this;
-  }
-
-  end(chunk) {
-    if (chunk) this.body += String(chunk);
-    this.writableEnded = true;
-    return this;
-  }
-
-  json() {
-    return JSON.parse(this.body);
-  }
-}
-
-const repoSkillPath = path.join(ROOT, 'skills', 'sd-prompt', 'SKILL.md');
-const defaultSkill = {
-  name: 'sd-prompt',
-  description: 'SD 提示词',
-  content: '# SD\n使用逗号分隔标签。',
-  path: repoSkillPath,
-};
+import { get, get as getJson, startRequest, VALID_OUTPUT } from './helpers.js';
 
 function createApi({
   chunks,
@@ -53,10 +15,7 @@ function createApi({
   const routes = [];
   const warnings = [];
   const calls = { stream: 0, saveImage: 0, streamArgs: null };
-  const skillService = skills === null ? null : skills ?? {
-    list: async () => [{ name: defaultSkill.name, description: defaultSkill.description, path: repoSkillPath }],
-    get: async () => defaultSkill,
-  };
+  const skillService = skills === null ? null : { registerProvider() {} };
 
   const ctx = {
     llm: {
@@ -120,35 +79,11 @@ function generationBody(overrides = {}) {
   };
 }
 
-function startRequest(handler, body, headers = {}) {
-  const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))];
-  const req = Object.assign(Readable.from(chunks), {
-    method: 'POST',
-    url: '/comfyui-prompt/api/generate',
-    headers: { 'content-type': 'application/json', ...headers },
-  });
-  req.resume = () => { req.resumed = true; };
-  const res = new MockResponse();
-  return { pending: handler(req, res), req, res };
-}
-
 async function generate(handler, body, headers) {
   const { pending, res } = startRequest(handler, body, headers);
   await pending;
   return res;
 }
-
-async function get(handler, pathname, method = 'GET') {
-  const req = new EventEmitter();
-  req.method = method;
-  req.url = `/comfyui-prompt${pathname}`;
-  req.headers = {};
-  const res = new MockResponse();
-  await handler(req, res);
-  return res;
-}
-
-const getJson = get;
 
 test('服务端一次生成返回三段结果与元数据', async () => {
   const { handler, calls } = createApi();
@@ -158,7 +93,7 @@ test('服务端一次生成返回三段结果与元数据', async () => {
   assert.equal(res.json().meta.skillName, 'sd-prompt');
   assert.equal(calls.stream, 1);
   assert.match(calls.streamArgs.system, /SYSTEM CONTRACT/);
-  assert.match(calls.streamArgs.system, /使用逗号分隔标签/);
+  assert.match(calls.streamArgs.system, /Stable Diffusion/);
   assert.match(calls.streamArgs.messages[0].content[0].text, /一个女孩在雨中/);
 });
 
@@ -178,13 +113,8 @@ test('空文本、缺少模型和缺失技能不会调用模型', async () => {
 });
 
 test('不在本仓库 skills/ 下的技能不能用于生成', async () => {
-  const { handler, calls } = createApi({
-    skills: {
-      list: async () => [],
-      get: async () => ({ ...defaultSkill, path: path.join(ROOT, '..', 'user', 'SKILL.md') }),
-    },
-  });
-  const res = await generate(handler, generationBody());
+  const { handler, calls } = createApi();
+  const res = await generate(handler, generationBody({ skillName: 'user-only' }));
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error.code, 'SKILL_NOT_FOUND');
   assert.equal(calls.stream, 0);
@@ -268,19 +198,15 @@ test('模型流错误映射为 MODEL_ERROR，未知异常不泄露原文', async
 });
 
 test('技能目录只返回仓库 skills/ 下的原生技能，且不下发正文', async () => {
-  const { handler } = createApi({
-    skills: {
-      list: async () => [
-        { name: 'sd-prompt', description: 'SD', path: repoSkillPath },
-        { name: 'user-only', description: '用户技能', path: path.join(ROOT, '..', 'user-skills', 'SKILL.md') },
-      ],
-      get: async () => defaultSkill,
-    },
-  });
+  const { handler } = createApi();
   const res = await getJson(handler, '/api/skills');
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json().skills, [{ name: 'sd-prompt', description: 'SD' }]);
-  assert.ok(!res.body.includes(defaultSkill.content));
+  assert.deepEqual(
+    res.json().skills.map((skill) => skill.name),
+    ['anima-prompt-mixed', 'moss-image-prompt-enhancer', 'sd-prompt'],
+  );
+  assert.ok(res.json().skills.every((skill) => Object.keys(skill).sort().join(',') === 'description,name'));
+  assert.ok(!res.body.includes('你来充当一位有艺术气息'));
 });
 
 test('模型目录聚合各 provider，单个 provider 失败不影响其余', async () => {
@@ -358,9 +284,9 @@ test('请求体不是 JSON 对象或 Content-Type 不对时拒绝', async () => 
   assert.equal(calls.stream, 0);
 });
 
-test('技能注册表缺席时返回明确的不可用错误', async () => {
+test('技能注册表缺席时面板仍直接读取仓库技能', async () => {
   const { handler } = createApi({ skills: null });
   const res = await getJson(handler, '/api/skills');
-  assert.equal(res.statusCode, 501);
-  assert.equal(res.json().error.code, 'SKILLS_UNAVAILABLE');
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.json().skills.some((skill) => skill.name === 'moss-image-prompt-enhancer'));
 });

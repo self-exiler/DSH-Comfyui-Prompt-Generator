@@ -114,7 +114,6 @@ window.__ModuleLoader__.load({
         ));
     }
 
-    exports.PANEL_ID = PANEL_ID;
     exports.apply = apply;
     exports.inject = inject;
     return module.exports;

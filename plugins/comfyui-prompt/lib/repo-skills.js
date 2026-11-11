@@ -34,12 +34,11 @@ export function createRepoSkillProvider(ctx, root) {
         return [];
       }
 
-      const skills = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const skill = await readEntry(entry.name, signal);
-        if (skill) skills.push(toCandidate(skill));
-      }
+      const skills = (await Promise.all(entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => readEntry(entry.name, signal))))
+        .filter(Boolean)
+        .map(toCandidate);
       return skills;
     },
     async get(candidate, { signal } = {}) {
@@ -71,7 +70,6 @@ function toCandidate(skill) {
     rank: 300,
     locator: skill.path,
     invocation: { modelInvocable: true, userInvocable: true },
-    metadata: skill.metadata,
   };
 }
 
@@ -96,18 +94,14 @@ function parseSkill(raw) {
   const description = fields.description?.trim();
   if (!NAME_PATTERN.test(name ?? '') || !description) return null;
 
-  const metadata = {};
-  if (fields.version) metadata.version = fields.version;
-  if (fields.target_model) metadata.target_model = fields.target_model;
   return {
     name,
     description,
-    metadata: Object.keys(metadata).length ? metadata : undefined,
     content: text.slice(match[0].length).trim(),
   };
 }
 
-/** 判断 candidate 是否位于 base 目录内（不含 base 自身）。plugin.js 与本文件共用。 */
+/** 判断 candidate 是否位于 base 目录内（不含 base 自身），provider 与测试共用。 */
 export function isPathInside(base, candidate) {
   if (typeof candidate !== 'string' || !candidate) return false;
   const relative = path.relative(path.resolve(base), path.resolve(candidate));

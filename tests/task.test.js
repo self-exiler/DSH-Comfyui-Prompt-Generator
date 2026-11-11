@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildPrompt } from '../src/core/prompt.js';
-import { TaskError, redactSecrets } from '../src/core/errors.js';
+import { buildAgentPrompt, buildPrompt } from '../src/core/prompt.js';
+import { modelErrorFromFailure, TaskError, redactSecrets } from '../src/core/errors.js';
 import { extractResult, parseStructuredOutput } from '../src/core/task.js';
 import { VALID_OUTPUT } from './helpers.js';
 
@@ -18,6 +18,29 @@ test('提示词分层：系统契约在前，技能规范随后，用户内容�
   assert.ok(system.startsWith('你是提示词改写器'));
   assert.match(system, /sd-prompt/);
   assert.ok(system.indexOf('只输出三段 JSON') < system.indexOf('使用逗号分隔标签'));
+  assert.match(user, /一个女孩/);
+  assert.doesNotMatch(system, /一个女孩/);
+});
+
+test('Agent 提示词：内核形状的技能块、资源清单与读取工具说明', () => {
+  const { system, user } = buildAgentPrompt({
+    mode: 'text',
+    text: '一个女孩',
+    skill,
+    systemPrompt: 'SYSTEM',
+    skillDir: 'C:/skills/sd-prompt',
+    resources: [
+      { path: 'references/layout.md', bytes: 42 },
+      { path: 'assets/模板.txt', bytes: 100 },
+    ],
+  });
+  assert.match(system, /<skill_content name="sd-prompt">/);
+  assert.match(system, /Base directory for this skill: C:\/skills\/sd-prompt/);
+  assert.match(system, /references\/layout\.md \(42 bytes\)/);
+  assert.match(system, /<skill_instructions>\n使用逗号分隔标签。/);
+  assert.match(system, /read_file/);
+  assert.match(system, /list_files/);
+  assert.doesNotMatch(system, /run_skill_script/);
   assert.match(user, /一个女孩/);
   assert.doesNotMatch(system, /一个女孩/);
 });
@@ -69,4 +92,15 @@ test('extractResult 拒绝缺字段、非字符串与空 prompt_en', () => {
 test('redactSecrets 脱敏常见密钥形态', () => {
   const redacted = redactSecrets('key sk-abcdefgh1234 Bearer abcdefgh12345678 api_key=hunter2hunter2');
   assert.doesNotMatch(redacted, /abcdefgh|hunter2/);
+});
+
+test('额度/限流错误提示切换模型，普通错误保留默认提示', () => {
+  const quota = modelErrorFromFailure({ message: 'Insufficient Balance', code: 'ACCOUNT_QUOTA' });
+  assert.equal(quota.code, 'MODEL_ERROR');
+  assert.match(quota.message, /Insufficient Balance/);
+  assert.match(quota.hint, /额度不足|限流/);
+  assert.deepEqual(quota.details, ['宿主错误码：ACCOUNT_QUOTA']);
+
+  const normal = modelErrorFromFailure({ message: 'boom' });
+  assert.match(normal.hint, /可稍后重试或更换模型/);
 });

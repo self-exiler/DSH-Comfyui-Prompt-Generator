@@ -16,10 +16,12 @@ import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TaskError, redactSecrets } from '../../../src/core/errors.js';
-import { IMAGE_TYPES, buildPrompt } from '../../../src/core/prompt.js';
+import { modelErrorFromFailure, TaskError, redactSecrets } from '../../../src/core/errors.js';
+import { IMAGE_TYPES, buildAgentPrompt, buildPrompt } from '../../../src/core/prompt.js';
 import { extractResult, parseStructuredOutput } from '../../../src/core/task.js';
-import { createRepoSkillProvider, isPathInside } from './repo-skills.js';
+import { canUseAgentEngine, runAgentGeneration } from './agent-engine.js';
+import { createRepoSkillProvider } from './repo-skills.js';
+import { listSkillResources } from './skill-resources.js';
 
 export const name = 'comfyui-prompt-tool';
 
@@ -41,6 +43,10 @@ export function apply(ctx, config = {}) {
   const root = path.resolve(config.root ?? REPO_ROOT);
   const prefix = `/${(config.prefix ?? DEFAULT_PREFIX).replace(/^\/+|\/+$/g, '')}`;
   const systemPrompt = resolveSystemPrompt(ctx, config, root);
+  const engine = config.engine === 'direct' ? 'direct' : 'agent';
+  const agentTimeoutMs = positiveNumber(config.agentTimeoutMs, 180_000);
+  // 面板直接使用仓库 provider 的清单，不经过宿主的全局技能合并与同名遮蔽。
+  const repoSkills = createRepoSkillProvider(ctx, root);
 
   // 路由必须挂在 ctx.effect 上：插件被卸载 / HMR 重载时由 cordis 自动注销。
   // 直接返回 dispose 函数不会被加载器调用，旧路由会残留并触发 "duplicate prefix route"。
@@ -58,7 +64,14 @@ export function apply(ctx, config = {}) {
     () => ctx.webServer.register({
       kind: 'prefix',
       path: `${prefix}/api`,
-      handler: (req, res) => serveApi(req, res, { ctx, prefix, root, systemPrompt }),
+      handler: (req, res) => serveApi(req, res, {
+        ctx,
+        prefix,
+        repoSkills,
+        systemPrompt,
+        engine,
+        agentTimeoutMs,
+      }),
     }),
     `comfyui-prompt: api ${prefix}/api`,
   );
@@ -66,14 +79,14 @@ export function apply(ctx, config = {}) {
   const skills = ctx.get('skills');
   if (skills?.registerProvider) {
     ctx.effect(
-      () => skills.registerProvider(() => createRepoSkillProvider(ctx, root)),
+      () => skills.registerProvider(() => repoSkills),
       'comfyui-prompt: repository skills',
     );
   } else {
-    ctx.logger.warn('comfyui-prompt: skills service unavailable; /api/skills will be disabled');
+    ctx.logger.warn('comfyui-prompt: skills service unavailable; host-wide skill discovery disabled, panel uses the repository provider');
   }
 
-  ctx.logger.info('comfyui-prompt-tool ready: %s (root: %s)', `${prefix}/src/ui/index.html`, root);
+  ctx.logger.info('comfyui-prompt-tool ready: %s (root: %s, engine: %s)', `${prefix}/src/ui/index.html`, root, engine);
 }
 
 function resolveSystemPrompt(ctx, config, root) {
@@ -137,13 +150,14 @@ async function serveStatic(req, res, { root, prefix }) {
 
 /* ------------------------------------------------------------------ 桥接 API */
 
-async function serveApi(req, res, { ctx, prefix, root, systemPrompt }) {
+async function serveApi(req, res, options) {
+  const { ctx, prefix, repoSkills } = options;
   const route = new URL(req.url, 'http://localhost').pathname.slice(prefix.length);
   try {
     if (route === '/api/models' && req.method === 'GET') return await handleModels(ctx, res);
-    if (route === '/api/skills' && req.method === 'GET') return await handleSkills(ctx, root, res);
+    if (route === '/api/skills' && req.method === 'GET') return await handleSkills(ctx, repoSkills, res);
     if (route === '/api/generate' && req.method === 'POST') {
-      return await handleGenerate(ctx, req, res, { root, systemPrompt });
+      return await handleGenerate(ctx, req, res, options);
     }
     sendJson(res, 404, { error: { code: 'NOT_FOUND', message: `未知端点 ${route}` } });
   } catch (error) {
@@ -180,49 +194,49 @@ async function handleModels(ctx, res) {
 }
 
 /**
- * 原生技能目录，只允许本仓库 skills/ 下的条目（ctx.skills 还可能含项目、用户和自定义根）。
- * 只返回名称与简介：技能正文在生成时由服务端按名称加载，不下发浏览器。
+ * 原生技能目录：直接读仓库 provider，只返回名称与简介。
+ * 不走 ctx.skills 的全局合并，避免同名技能遮蔽或其它 provider 的路径干扰。
  */
-async function handleSkills(ctx, root, res) {
-  const registry = ctx.get('skills');
-  if (!registry?.list) throw new TaskError('SKILLS_UNAVAILABLE');
-
-  const skillsRoot = path.resolve(root, 'skills');
+async function handleSkills(ctx, repoSkills, res) {
   let summaries;
   try {
-    summaries = await registry.list({ cwd: root });
+    summaries = await repoSkills.list();
   } catch (error) {
     ctx.logger.warn('comfyui-prompt skill discovery failed: %s', redactSecrets(error.message));
-    throw new TaskError('SKILLS_UNAVAILABLE', { message: 'dsh 技能目录读取失败', status: 502 });
+    throw new TaskError('SKILLS_UNAVAILABLE', { message: '仓库技能目录读取失败', status: 502 });
   }
 
   const skills = summaries
-    .filter((summary) => isPathInside(skillsRoot, summary.path))
     .map(({ name: skillName, description }) => ({ name: skillName, description: description ?? '' }))
     .sort((a, b) => a.name.localeCompare(b.name));
   sendJson(res, 200, {
     skills,
     ...(skills.length ? {} : {
-      hint: `未发现 ${skillsRoot} 下的技能；请确认 dsh skill-filesystem 的 customSkillDirs 包含该目录。`,
+      hint: '未在仓库 skills/ 下发现带有效 SKILL.md 的技能。',
     }),
   });
 }
 
-async function loadRepoSkill(ctx, root, skillName) {
+async function loadRepoSkill(repoSkills, skillName, signal) {
   if (typeof skillName !== 'string' || !skillName) {
     throw new TaskError('SKILL_NOT_FOUND', { message: '尚未选择技能' });
   }
-  const registry = ctx.get('skills');
-  if (!registry?.get) throw new TaskError('SKILL_NOT_FOUND', { message: '宿主未提供技能注册表' });
-  const skill = await registry.get(skillName, { cwd: root });
-  if (!skill || !isPathInside(path.resolve(root, 'skills'), skill.path)) {
+  const candidate = (await repoSkills.list({ signal })).find((skill) => skill.name === skillName);
+  if (!candidate) {
     throw new TaskError('SKILL_NOT_FOUND', { message: `技能 ${skillName} 不属于本仓库` });
   }
+  const skill = await repoSkills.get(candidate, { signal });
+  if (!skill) throw new TaskError('SKILL_NOT_FOUND', { message: `技能 ${skillName} 读取失败` });
   return skill;
 }
 
-/** 单次生成：服务端完成输入校验、技能加载、提示词组装、调用与三段解析。 */
-async function handleGenerate(ctx, req, res, { root, systemPrompt }) {
+/**
+ * 生成入口：优先走宿主 Agent（后台受限工具循环），宿主能力缺失时回退到一次直出。
+ * 两条路径的输入校验、图片入库和响应契约完全一致。
+ */
+async function handleGenerate(ctx, req, res, {
+  repoSkills, systemPrompt, engine, agentTimeoutMs,
+}) {
   // 只接受 JSON：application/json 不属于 CORS 简单请求，跨站表单无法直接触发模型调用。
   if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
     throw new TaskError('CONTENT_TYPE_UNSUPPORTED');
@@ -258,11 +272,82 @@ async function handleGenerate(ctx, req, res, { root, systemPrompt }) {
     throw new TaskError('MODEL_REQUIRED', { message: 'modelId 必须是 "<provider>::<model>" 形式' });
   }
 
-  const skill = await loadRepoSkill(ctx, root, body.skillName);
+  const skill = await loadRepoSkill(repoSkills, body.skillName, signal);
+  const imageContent = mode === 'image' ? await admitImage(ctx, body.image) : null;
+  throwIfCancelled();
+
+  if (engine !== 'direct' && canUseAgentEngine(ctx)) {
+    return await handleGenerateAgent(ctx, res, {
+      mode, text, providerId, model, skill, imageContent, signal, startedAt,
+      systemPrompt, agentTimeoutMs,
+    });
+  }
+
+  await handleGenerateDirect(ctx, res, {
+    mode, text, providerId, model, skill, imageContent, signal, startedAt, systemPrompt,
+  });
+}
+
+/** Agent 路径：技能目录内只读工具 + 宿主工具循环，最终取 assistant 文本解析三段结果。 */
+async function handleGenerateAgent(ctx, res, {
+  mode, text, providerId, model, skill, imageContent, signal, startedAt,
+  systemPrompt, agentTimeoutMs,
+}) {
+  const skillDir = path.dirname(skill.path);
+  let resources = [];
+  try {
+    resources = await listSkillResources(skillDir, { signal });
+  } catch (error) {
+    if (error.name === 'AbortError') throw new TaskError('CANCELLED');
+    // 资源清单失败不阻止自包含技能；模型仍可调用 list_files 重试。
+    ctx.logger.warn('comfyui-prompt resource listing failed: %s', redactSecrets(error.message));
+  }
+
+  const prompt = buildAgentPrompt({
+    mode,
+    text,
+    skill,
+    systemPrompt,
+    skillDir,
+    resources,
+  });
+  const content = [{ type: 'text', text: prompt.user }];
+  if (imageContent) content.push(imageContent);
+
+  const output = await runAgentGeneration(ctx, {
+    providerId,
+    model,
+    systemPrompt: prompt.system,
+    userContent: content,
+    skillDir,
+    signal,
+    timeoutMs: agentTimeoutMs,
+  });
+  if (signal.aborted) throw new TaskError('CANCELLED');
+
+  const durationMs = Date.now() - startedAt;
+  ctx.logger.info('comfyui-prompt agent done: skill=%s tools=%d duration=%dms',
+    skill.name, output.toolCalls.length, durationMs);
+  sendJson(res, 200, {
+    result: parseAgentResult(output.texts),
+    meta: {
+      mode,
+      modelId: `${providerId}::${model}`,
+      skillName: skill.name,
+      durationMs,
+      engine: 'agent',
+      toolCalls: output.toolCalls.length,
+    },
+  });
+}
+
+/** 回退路径：一次 ctx.llm.stream 直出，不创建 Session。 */
+async function handleGenerateDirect(ctx, res, {
+  mode, text, providerId, model, skill, imageContent, signal, startedAt, systemPrompt,
+}) {
   const prompt = buildPrompt({ mode, text, skill, systemPrompt });
   const content = [{ type: 'text', text: prompt.user }];
-  if (mode === 'image') content.push(await admitImage(ctx, body.image));
-  throwIfCancelled();
+  if (imageContent) content.push(imageContent);
 
   let output = '';
   let blockHasDelta = false;
@@ -293,11 +378,7 @@ async function handleGenerate(ctx, req, res, { root, systemPrompt }) {
 
   // dsh 的 stream 把适配器与调用失败转成终止 chunk，而不是抛出异常。
   if (finish?.kind === 'error') {
-    const failure = finish.failure ?? {};
-    throw new TaskError('MODEL_ERROR', {
-      message: failure.message ?? '模型调用失败',
-      details: failure.code ? [`宿主错误码：${failure.code}`] : [],
-    });
+    throw modelErrorFromFailure(finish.failure, '模型调用失败');
   }
   if (finish?.kind === 'aborted') throw new TaskError('CANCELLED');
   if (!finish) throw new TaskError('MODEL_ERROR', { message: '模型响应流不完整：缺少 finish 终止块' });
@@ -307,7 +388,7 @@ async function handleGenerate(ctx, req, res, { root, systemPrompt }) {
       providerId, model, finish.kind ?? 'none');
     throw new TaskError('MODEL_ERROR', { message: '模型没有返回文本内容' });
   }
-  throwIfCancelled();
+  if (signal.aborted) throw new TaskError('CANCELLED');
 
   sendJson(res, 200, {
     result: extractResult(parseStructuredOutput(output)),
@@ -316,8 +397,22 @@ async function handleGenerate(ctx, req, res, { root, systemPrompt }) {
       modelId: `${providerId}::${model}`,
       skillName: skill.name,
       durationMs: Date.now() - startedAt,
+      engine: 'direct',
     },
   });
+}
+
+/** Agent 可能先输出解释再输出结果；从最后一条可解析的 assistant 文本开始尝试。 */
+function parseAgentResult(texts) {
+  let firstError;
+  for (let index = texts.length - 1; index >= 0; index -= 1) {
+    try {
+      return extractResult(parseStructuredOutput(texts[index]));
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  throw firstError ?? new TaskError('MODEL_ERROR', { message: 'Agent 没有返回可解析的文本' });
 }
 
 /**
@@ -365,6 +460,11 @@ async function admitImage(ctx, image) {
       details: error.code ? [`宿主错误码：${error.code}`] : [],
     });
   }
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 async function readJsonBody(req) {

@@ -64,8 +64,8 @@ export const ERROR_CODES = Object.freeze({
   SKILLS_UNAVAILABLE: {
     status: 501,
     stage: 'model',
-    message: '当前 dsh 宿主未提供技能注册表',
-    hint: '',
+    message: '仓库技能目录读取失败',
+    hint: '请检查仓库 skills/ 是否存在且可读。',
   },
   MODEL_REQUIRED: {
     status: 400,
@@ -90,6 +90,12 @@ export const ERROR_CODES = Object.freeze({
     stage: 'request',
     message: '模型返回错误',
     hint: '可稍后重试或更换模型；插件不会自动改用其他 Provider。',
+  },
+  MODEL_TIMEOUT: {
+    status: 504,
+    stage: 'request',
+    message: '模型调用超时',
+    hint: '技能资源读取或模型响应耗时过长，请重试或换用更快的模型。',
   },
   CANCELLED: {
     status: 499,
@@ -136,6 +142,21 @@ export function toTaskError(error) {
   if (error?.name === 'AbortError') return new TaskError('CANCELLED');
   return new TaskError('HOST_ERROR', {
     message: `宿主调用失败：${error?.message ?? String(error)}`,
+  });
+}
+
+const MODEL_QUOTA_CODES = new Set(['ACCOUNT_QUOTA', 'RATE_LIMIT', 'QUOTA_EXCEEDED']);
+
+/** 把终止块里的模型失败转成 TaskError；额度/限流错误给出明确的切换模型提示。 */
+export function modelErrorFromFailure(failure, fallbackMessage = '模型调用失败') {
+  const code = typeof failure?.code === 'string' ? failure.code : undefined;
+  const quota = code !== undefined && MODEL_QUOTA_CODES.has(code.toUpperCase());
+  return new TaskError('MODEL_ERROR', {
+    message: failure?.message ?? fallbackMessage,
+    hint: quota
+      ? '该 Provider 额度不足或触发限流；请在模型下拉中切换其他模型（识图请选支持图片的魔搭 / AMD 等），本插件不会自动跨 Provider 重试。'
+      : undefined,
+    details: code ? [`宿主错误码：${code}`] : [],
   });
 }
 
