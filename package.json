@@ -4,14 +4,23 @@
   "private": true,
   "type": "module",
   "description": "ComfyUI 提示词整合工具（DeepSeek Harness 插件）",
-  "scripts": {
-    "test": "node --test tests/*.test.js",
-    "check": "node tools/check-syntax.js"
+  "main": "lib/plugin.js",
+  "exports": {
+    ".": "./lib/plugin.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
   },
   "dsh": {
+    "client": {
+      "platform": "web"
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node tools/check-syntax.js"
   },
   "engines": {
     "node": ">=20",

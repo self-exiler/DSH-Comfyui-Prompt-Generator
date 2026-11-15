@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
-import { createRepoSkillProvider, isPathInside } from '../plugins/comfyui-prompt/lib/repo-skills.js';
+import { createRepoSkillProvider, isPathInside } from '../lib/repo-skills.js';
 import { ROOT } from './helpers.js';
 
 const ctx = { logger: { warn() {} } };

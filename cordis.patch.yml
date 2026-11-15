@@ -1,7 +1,8 @@
 # dsh 组合包补丁：安装本仓库（Git 依赖或 link:）后，dsh 自动启用本组合包，
-# 由下面这行把插件挂进 web profile。插件包位于 plugins/comfyui-prompt，因此用
-# 包内深层路径指定服务端入口；浏览器半边由该子包 package.json 的 dsh.client 提供。
+# 由下面这行把插件挂进 web profile。行名必须是裸包名：dsh 的浏览器模块扫描器
+# 只对裸包名（或 ./x、绝对路径、file:）解析 package.json，包内子路径写法会被跳过，
+# 导致 dsh.client 声明永远不被发现。服务端入口与浏览器半边共用根 package.json。
 - insert:
     - id: comfyui-prompt-tool
-      name: comfyui-prompt-harness-plugin/plugins/comfyui-prompt/lib/plugin.js
+      name: comfyui-prompt-harness-plugin
       config: {}

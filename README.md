@@ -21,7 +21,7 @@ DeepSeek Harness（dsh）插件：把碎片文本或图片整理成可直接粘�
 dsh plugin --profile web add "git+https://github.com/self-exiler/DSH-Comfyui-Prompt-Generator.git"
 ```
 
-仓库根是一个 dsh 组合包（`package.json` 的 `dsh.bundle`）：安装成功后 dsh 自动把 `comfyui-prompt-harness-plugin` 加入 `dsh.profile.bundles`，再由根目录的 `cordis.patch.yml` 插入插件行；浏览器半边由 `plugins/comfyui-prompt` 的 `dsh.client` 声明提供。无需手工编辑 `~/.dsh/profiles/web/cordis.patch.yml`。
+仓库根同时是 dsh 组合包与插件包：`package.json` 的 `dsh.bundle` 让 dsh 在安装成功后自动把 `comfyui-prompt-harness-plugin` 加入 `dsh.profile.bundles`，根目录的 `cordis.patch.yml` 再用裸包名把插件行插入 profile；服务端入口走 `main`，浏览器半边由同一个包的 `dsh.client` 与 `exports["./client"]` 提供。补丁行名必须是裸包名，包内子路径写法会被浏览器模块扫描器跳过。无需手工编辑 `~/.dsh/profiles/web/cordis.patch.yml`。
 
 重启 `dsh web`，从侧栏打开「ComfyUI 提示词」。需要改挂载前缀、根目录或系统提示词时，按行 id `comfyui-prompt-tool` 在 profile patch 中覆盖 `config`（`prefix`、`root`、`systemPrompt`，见[系统提示词](#系统提示词)）。生成引擎和工具行为也可在同一 `config` 中覆盖：
 
@@ -96,8 +96,8 @@ npm run check       # 全仓 JS 语法检查
 ## 目录结构
 
 ```text
-package.json         dsh 组合包声明（dsh.bundle）与开发脚本
-cordis.patch.yml     组合包补丁：插入 comfyui-prompt-tool 插件行
+package.json         dsh 组合包 + 插件包声明（main、exports、dsh.client、dsh.bundle）
+cordis.patch.yml     组合包补丁：用裸包名插入 comfyui-prompt-tool 插件行
 src/core/
   errors.js          错误码、TaskError、脱敏
   prompt.js          系统契约 + 技能 + 用户消息组装（含 Agent 技能资源块与图片格式白名单）
@@ -111,12 +111,12 @@ src/ui/
   styles.css         dsh token 作用域的样式
 prompts/system.md    默认系统提示词
 skills/              仓库原生技能
-plugins/comfyui-prompt/
-  lib/plugin.js      dsh 服务端：静态资源 + API + 生成
-  lib/repo-skills.js ctx.skills provider（仅仓库 skills/）
-  lib/agent-engine.js 后台受限 Agent：临时会话、scoped 工具、事件收集
-  lib/skill-resources.js 技能资源清单、read_file/list_files（只读）
-  lib/client.js      dsh 侧栏入口与工作区挂载
+lib/
+  plugin.js          dsh 服务端：静态资源 + API + 生成
+  repo-skills.js     ctx.skills provider（仅仓库 skills/）
+  agent-engine.js    后台受限 Agent：临时会话、scoped 工具、事件收集
+  skill-resources.js 技能资源清单、read_file/list_files（只读）
+  client.js          dsh 侧栏入口与工作区挂载（exports["./client"]）
 tests/               node:test
 tools/
   check-syntax.js    语法检查

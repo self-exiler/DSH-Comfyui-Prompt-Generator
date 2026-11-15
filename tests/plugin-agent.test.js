@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { apply } from '../plugins/comfyui-prompt/lib/plugin.js';
-import { LIST_TOOL, READ_TOOL } from '../plugins/comfyui-prompt/lib/skill-resources.js';
+import { apply } from '../lib/plugin.js';
+import { LIST_TOOL, READ_TOOL } from '../lib/skill-resources.js';
 import { startRequest, VALID_OUTPUT } from './helpers.js';
 
 const SKILL_NAME = 'moss-image-prompt-enhancer';

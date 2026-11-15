@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
-import { canUseAgentEngine, runAgentGeneration } from '../plugins/comfyui-prompt/lib/agent-engine.js';
-import { LIST_TOOL, READ_TOOL } from '../plugins/comfyui-prompt/lib/skill-resources.js';
+import { canUseAgentEngine, runAgentGeneration } from '../lib/agent-engine.js';
+import { LIST_TOOL, READ_TOOL } from '../lib/skill-resources.js';
 import { ROOT, VALID_OUTPUT } from './helpers.js';
 
 const SKILL_DIR = path.join(ROOT, 'skills', 'sd-prompt');

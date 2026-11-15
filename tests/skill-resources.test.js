@@ -10,7 +10,7 @@ import {
   listSkillResources,
   READ_TOOL,
   readSkillFile,
-} from '../plugins/comfyui-prompt/lib/skill-resources.js';
+} from '../lib/skill-resources.js';
 
 async function makeSkill() {
   const dir = await mkdtemp(path.join(tmpdir(), 'comfyui-prompt-test-'));

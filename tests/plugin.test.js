@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { apply } from '../plugins/comfyui-prompt/lib/plugin.js';
+import { apply } from '../lib/plugin.js';
 import { get, get as getJson, startRequest, VALID_OUTPUT } from './helpers.js';
 
 function createApi({
