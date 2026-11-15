@@ -32,3 +32,24 @@ test('isPathInside 不含 base 自身，也不放行 .. 逃逸', () => {
   assert.equal(isPathInside(SKILLS_ROOT, path.join(SKILLS_ROOT, '..', 'x')), false);
   assert.equal(isPathInside(SKILLS_ROOT, ''), false);
 });
+
+test('customSkillsDir 下的技能纳入列表，可正常读取正文', async () => {
+  const customRoot = path.join(ROOT, 'tests', 'fixtures', 'custom-skills');
+  const provider = createRepoSkillProvider(ctx, ROOT, customRoot);
+  const skills = await provider.list();
+  assert.ok(skills.some((skill) => skill.name === 'my-custom-skill'));
+
+  const candidate = skills.find((skill) => skill.name === 'my-custom-skill');
+  const skill = await provider.get(candidate);
+  assert.equal(skill.name, 'my-custom-skill');
+  assert.equal(skill.description, '自定义工作区技能');
+  assert.equal(await provider.get({ name: 'x', path: path.join(customRoot, 'my-custom-skill', 'other.md') }), undefined);
+});
+
+test('仓库同名技能优先于自定义工作区技能', async () => {
+  const customRoot = path.join(ROOT, 'tests', 'fixtures', 'custom-skills');
+  const skills = await createRepoSkillProvider(ctx, ROOT, customRoot).list();
+  const sdPrompt = skills.filter((skill) => skill.name === 'sd-prompt');
+  assert.equal(sdPrompt.length, 1);
+  assert.ok(isPathInside(SKILLS_ROOT, sdPrompt[0].path));
+});

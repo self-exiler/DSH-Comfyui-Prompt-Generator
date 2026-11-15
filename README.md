@@ -29,9 +29,12 @@ dsh plugin --profile web add "git+https://github.com/self-exiler/DSH-Comfyui-Pro
 config:
   engine: agent        # agent（默认）| direct
   agentTimeoutMs: 180000
+  customSkillsDir: D:/my-skills   # 可选：自定义技能工作区
 ```
 
 `engine: direct` 强制回到无工具的一次直出。工具只包含技能目录内的只读文件/知识查询，脚本类工具不会注册也不会执行。
+
+`customSkillsDir` 指定一个自定义工作区路径，该目录下每个子目录的 `SKILL.md` 会与本仓库 `skills/` 一起纳入面板技能下拉列表；目录不存在时只告警，不影响仓库技能。与仓库技能同名时，仓库技能优先。
 
 升级时先移除再安装（Git 依赖不跟随版本号）：
 
