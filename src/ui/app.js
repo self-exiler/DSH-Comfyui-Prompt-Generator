@@ -34,6 +34,7 @@ function initialState() {
     modelVision: '',
     skills: [],
     skillKey: '',
+    skillDir: '',
     result: null,
     meta: null,
     busy: false,
@@ -162,12 +163,14 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
     state.modelText = store.get('cp.model.text') ?? '';
     state.modelVision = store.get('cp.model.vision') ?? '';
     state.skillKey = store.get('cp.skill') ?? '';
+    state.skillDir = store.get('cp.skillDir') ?? '';
     state.mode = store.get('cp.mode') === 'image' ? 'image' : 'text';
 
     const inputText = el('input-text');
     inputText.value = store.get('cp.input.text') ?? '';
     el('input-image-note').value = store.get('cp.input.image-note') ?? '';
     el('char-count').textContent = `${inputText.value.length} 字`;
+    el('skill-dir').value = state.skillDir;
   }
 
   /* ------------------------------------------------------------------ 目录 */
@@ -208,7 +211,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
   async function refreshSkills() {
     if (disposed) return;
     const token = ++skillRefreshToken;
-    const payload = await bridge.skills();
+    const payload = await bridge.skills(state.skillDir);
     if (disposed || token !== skillRefreshToken) return;
     state.skills = payload.skills;
     renderSkillSelect();
@@ -365,6 +368,24 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
       renderSkillMeta();
     });
 
+    // 应用自定义技能目录：保存后重拉技能列表，合并进下拉
+    const skillDirInput = el('skill-dir');
+    const applySkillDir = () => {
+      if (disposed) return;
+      state.skillDir = skillDirInput.value.trim();
+      store.set('cp.skillDir', state.skillDir);
+      refreshSkills().catch((error) => {
+        if (!disposed) showError(toTaskError(error));
+      });
+    };
+    el('apply-skill-dir').addEventListener('click', applySkillDir);
+    skillDirInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applySkillDir();
+      }
+    });
+
     el('generate').addEventListener('click', generate);
     el('cancel').addEventListener('click', cancel);
     el('retry').addEventListener('click', () => {
@@ -498,6 +519,7 @@ function createAppInstance(container, { embedded = false, signal } = {}) {
         image: state.mode === 'image' ? state.image : null,
         modelId,
         skillName: skill.name,
+        skillDir: state.skillDir,
       }, controller.signal);
       if (disposed) return;
       state.result = output.result;

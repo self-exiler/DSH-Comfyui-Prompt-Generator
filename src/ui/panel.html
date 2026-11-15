@@ -70,6 +70,13 @@
           <span>技能决定 prompt_en 的写法规范（系统层的三段输出协议不受技能影响）</span>
           <select id="skill-select"></select>
         </label>
+        <label class="field">
+          <span>自定义技能目录（可选，填入本机路径后刷新列表，目录下每个子目录需含 SKILL.md）</span>
+          <div class="row">
+            <input type="text" id="skill-dir" placeholder="例如 D:/my-skills" autocomplete="off" />
+            <button type="button" class="small ghost" id="apply-skill-dir">应用</button>
+          </div>
+        </label>
         <div class="skill-meta" id="skill-meta"></div>
         <div class="skill-errors" id="skill-errors"></div>
       </div>

@@ -53,3 +53,19 @@ test('仓库同名技能优先于自定义工作区技能', async () => {
   assert.equal(sdPrompt.length, 1);
   assert.ok(isPathInside(SKILLS_ROOT, sdPrompt[0].path));
 });
+
+test('list/get 支持请求级 extraRoot，仓库技能仍优先', async () => {
+  const customRoot = path.join(ROOT, 'tests', 'fixtures', 'custom-skills');
+  const provider = createRepoSkillProvider(ctx, ROOT);
+  const skills = await provider.list({ extraRoot: customRoot });
+  assert.ok(skills.some((skill) => skill.name === 'my-custom-skill'));
+
+  const candidate = skills.find((skill) => skill.name === 'my-custom-skill');
+  assert.equal((await provider.get(candidate, { extraRoot: customRoot })).name, 'my-custom-skill');
+  // 未携带 extraRoot 时同一候选不可读
+  assert.equal(await provider.get(candidate), undefined);
+
+  const sdPrompt = skills.filter((skill) => skill.name === 'sd-prompt');
+  assert.equal(sdPrompt.length, 1);
+  assert.ok(isPathInside(SKILLS_ROOT, sdPrompt[0].path));
+});

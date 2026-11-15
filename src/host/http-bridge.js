@@ -47,16 +47,17 @@ export function createBridge(base) {
       return data;
     },
     /** -> { skills: [{ name, description }], hint? } */
-    async skills() {
-      const data = await request('GET', 'api/skills');
+    async skills(dir) {
+      const query = typeof dir === 'string' && dir.trim() ? `?dir=${encodeURIComponent(dir.trim())}` : '';
+      const data = await request('GET', `api/skills${query}`);
       if (!Array.isArray(data.skills)) {
         throw new TaskError('HOST_ERROR', { message: '宿主技能目录响应缺少 skills 数组' });
       }
       return data;
     },
     /** -> { result: { prompt_en, translation_zh, notes }, meta } */
-    async generate({ mode, text, image, modelId, skillName }, signal) {
-      const data = await request('POST', 'api/generate', { mode, text, image, modelId, skillName }, signal);
+    async generate({ mode, text, image, modelId, skillName, skillDir }, signal) {
+      const data = await request('POST', 'api/generate', { mode, text, image, modelId, skillName, skillDir }, signal);
       if (!data.result || !data.meta) {
         throw new TaskError('HOST_ERROR', { message: '宿主生成响应缺少 result 或 meta' });
       }
